@@ -43,7 +43,7 @@ use ruma::{
     api::client::keys::claim_keys::v3::Request as KeysClaimRequest,
     events::{
         room::{encrypted::RoomEncryptedEventContent, history_visibility::HistoryVisibility},
-        AnySyncMessageLikeEvent, MessageLikeEventContent, SyncMessageLikeEvent,
+        MessageLikeEventContent, SyncMessageLikeEvent,
     },
     DeviceId, OwnedTransactionId, TransactionId,
 };
@@ -51,10 +51,13 @@ use ruma::{
     api::client::{self as api, push::get_notifications::v3::Notification},
     events::{
         push_rules::PushRulesEvent,
-        room::member::{MembershipState, OriginalSyncRoomMemberEvent, RoomMemberEvent},
+        room::{
+            member::{MembershipState, OriginalSyncRoomMemberEvent, RoomMemberEvent},
+            redaction::SyncRoomRedactionEvent,
+        },
         AnyGlobalAccountDataEvent, AnyRoomAccountDataEvent, AnyStrippedStateEvent,
-        AnySyncEphemeralRoomEvent, AnySyncRoomEvent, AnySyncStateEvent, GlobalAccountDataEventType,
-        StateEventType, SyncStateEvent,
+        AnySyncEphemeralRoomEvent, AnySyncMessageLikeEvent, AnySyncRoomEvent, AnySyncStateEvent,
+        GlobalAccountDataEventType, StateEventType, SyncStateEvent,
     },
     push::{Action, PushConditionRoomCtx, Ruleset},
     serde::Raw,
@@ -313,6 +316,19 @@ impl BaseClient {
                             }
                         },
 
+                        AnySyncRoomEvent::MessageLike(AnySyncMessageLikeEvent::RoomRedaction(
+                            // Redacted redactions don't have the `redacts` key, so we can't know
+                            // what they were meant to redact. A future room version might move the
+                            // redacts key, replace the current redaction event altogether, or have
+                            // the redacts key survive redaction.
+                            SyncRoomRedactionEvent::Original(r),
+                        )) => {
+                            room_info.handle_redaction(r);
+                            // FIXME: Find the event in self.store (needs
+                            // something like a get_event_by_id), redact it and
+                            // put it back via StateChanges.
+                        }
+
                         #[cfg(feature = "encryption")]
                         AnySyncRoomEvent::MessageLike(e) => match e {
                             AnySyncMessageLikeEvent::RoomEncrypted(
@@ -341,6 +357,7 @@ impl BaseClient {
                             }
                             _ => (),
                         },
+
                         #[cfg(not(feature = "encryption"))]
                         _ => (),
                     }
